@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HorseHub - Best Feline Content</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #000; color: #fff; }
+        .ph-orange { color: #bbff00; }
+        .ph-bg-orange { background-color: #bbff00; }
+        
+        /* FIX 1: Responsive Grid Setup */
+        .grid-container {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        /* FIX 2: Medien-Container für natives Seitenverhältnis */
+        .card {
+            background-color: #1b1b1b;
+            border: 1px solid transparent;
+            transition: transform 0.3s, border-color 0.3s;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-radius: 0.5rem;
+        }
+
+        .card:hover { border-color: #bbff00; transform: scale(1.02); }
+
+        .media-container {
+            width: 100%;
+            height: auto;
+            max-height: 500px;
+            overflow: hidden;
+        }
+
+        .media-container img, .media-container video { 
+            width: 100%; 
+            height: auto;
+            object-fit: contain; 
+        }
+        
+        /* FIX FÜR THUMBNAIL (Da kein Poster mehr vorhanden ist, optionaler Hintergrund) */
+        .media-container video {
+             background-color: #000; 
+        }
+    </style>
+</head>
+<body class="font-sans">
+
+    <nav class="bg-[#1b1b1b] p-4 flex justify-between items-center border-b border-gray-800 sticky top-0 z-10">
+        <div class="text-3xl font-bold flex items-center">
+            Horse<span class="ph-bg-orange text-black px-2 py-1 rounded ml-1">Hub</span>
+        </div>
+        <div class="flex-1 mx-10 max-w-2xl">
+            <input id="searchBar" type="text" placeholder="Suche nach Tags oder Dateinamen..." class="w-full bg-[#2b2b2b] border border-gray-600 rounded-full py-2 px-6 focus:outline-none focus:border-[#ff9900]">
+        </div>
+        <div>
+            <button onclick="toggleAdmin()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition-colors duration-200">Admin Tool</button>
+        </div>
+    </nav>
+
+    <div id="adminPanel" class="hidden bg-[#121212] p-6 border-b border-[#ff9900]">
+        <h2 class="text-xl mb-4 text-white">⚙️ Globale Tag-Verwaltung</h2>
+        <div class="flex items-center gap-4 mb-4">
+            <label class="flex items-center gap-2 text-sm">
+                <input id="showTagButtonsVideosToggle" type="checkbox" class="form-checkbox h-4 w-4" />
+                <span class="ml-1">'Tags bearbeiten' unter Medien anzeigen</span>
+            </label>
+        </div>
+        <div class="flex gap-2 mb-4">
+            <input id="newTagName" type="text" placeholder="Neuer Tag Name" class="bg-[#2b2b2b] p-2 rounded flex-1">
+            <button onclick="addGlobalTag()" class="ph-bg-orange text-black font-bold px-4 py-2 rounded hover:opacity-90 transition">Tag erstellen</button>
+        </div>
+        <details id="globalTagsDetails" class="mb-4">
+            <summary class="cursor-pointer text-sm text-gray-300 p-2 rounded hover:bg-[#161616]">Vorhandene Tags (klicken zum Ein-/Ausklappen)</summary>
+            <div id="globalTagsList" class="flex flex-wrap gap-2 mt-2 p-2"></div>
+        </details>
+        <div class="mt-4 p-4 border border-red-500 bg-red-900 bg-opacity-30 rounded text-sm text-red-300">
+            **Achtung:** Nach Änderungen (Tags erstellen/löschen) unbedingt auf den Button klicken, um die `metadata.json` zu aktualisieren!
+        </div>
+        <button onclick="exportMetadata()" class="mt-4 bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-bold text-white transition">⬇️ JSON Download (Speichern & Pushen)</button>
+    </div>
+
+    <main id="mediaGrid" class="p-6 grid-container"></main>
+
+    <div id="taggingModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-[#1b1b1b] p-6 rounded-lg w-full max-w-lg border border-[#ff9900]">
+            <h2 class="text-2xl mb-4 ph-orange">Tags bearbeiten für:</h2>
+            <p id="modalFilename" class="text-gray-400 mb-4 truncate"></p>
+
+            <h3 class="text-lg mb-2 text-white">Verfügbare Tags:</h3>
+            <div id="availableTagsList" class="flex flex-wrap gap-2 mb-6 p-2 bg-[#2b2b2b] rounded max-h-40 overflow-y-auto"></div>
+
+            <h3 class="text-lg mb-2 text-white">Zugewiesene Tags:</h3>
+            <div id="assignedTagsList" class="flex flex-wrap gap-2 p-2 bg-[#2b2b2b] rounded min-h-[40px]"></div>
+
+            <div class="mt-6 flex justify-end gap-3">
+                <button onclick="saveModalChanges()" class="ph-bg-orange text-black font-bold px-4 py-2 rounded hover:opacity-90 transition">Speichern</button>
+                <button onclick="closeModal()" class="bg-gray-700 text-white px-4 py-2 rounded hover:bg-gray-600 transition">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    let metadata = { tags: [], assignments: {}, files: [] };
+    let currentFileInModal = null;
+    let showTagButtonsForVideos = false; // Default: aus, kann im Admin-Panel eingeschaltet werden
+    const grid = document.getElementById('mediaGrid');
+    const searchInput = document.getElementById('searchBar');
+    const modal = document.getElementById('taggingModal');
+    
+    // --- NEUE PERFORMANCE VARIABLEN ---
+    const MAX_PLAYING_VIDEOS = 8;
+    let playingVideoCount = 0;
+    let mediaObserver;
+
+    // --- HELFER FUNKTIONEN FÜR VIDEO-MANAGEMENT ---
+
+    function setupObserver() {
+        if ('IntersectionObserver' in window) {
+            mediaObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    const card = entry.target;
+                    const mediaElement = card.querySelector('video, img');
+                    if (!mediaElement) return;
+
+                    if (entry.isIntersecting) {
+                        handleMediaIntersection(mediaElement, true);
+                    } else {
+                        handleMediaIntersection(mediaElement, false);
+                    }
+                });
+            }, {
+                rootMargin: '100px', // Beginnt 100px vor dem Eintritt in den Viewport
+                threshold: 0.01 // Trigger, sobald 1% des Elements sichtbar ist
+            });
+        }
+    }
+
+    function handleMediaIntersection(mediaElement, isIntersecting) {
+        if (mediaElement.tagName === 'VIDEO') {
+            mediaElement.dataset.observed = isIntersecting ? 'true' : 'false'; // Sichtbarkeits-Tracking
+
+            if (isIntersecting) {
+                // Video ist sichtbar: Versuche abzuspielen, wenn Slot frei
+                if (playingVideoCount < MAX_PLAYING_VIDEOS) {
+                    playVideo(mediaElement);
+                }
+            } else {
+                // Video verlässt Viewport: Sofort pausieren
+                pauseVideo(mediaElement);
+            }
+        }
+        // Bilder nutzen bereits loading="lazy" und werden vom Browser effizient behandelt.
+    }
+
+async function saveMetadataToServer(metadata) {
+  try {
+    const res = await fetch('/save-metadata', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(metadata)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = body.error || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    if (!body.ok) {
+      throw new Error(body.error || 'Unbekannter Fehler');
+    }
+    // Erfolg – du kannst statt alert auch UI-Feedback setzen
+    alert('metadata.json erfolgreich auf dem Server gespeichert.');
+    return true;
+  } catch (err) {
+    alert('Fehler beim Speichern: ' + (err.message || err));
+    console.error(err);
+    return false;
+  }
+}
+
+    function playVideo(videoElement) {
+        // Spielen nur versuchen, wenn Video pausiert ist UND wir unter dem Limit sind
+        if (videoElement.paused && playingVideoCount < MAX_PLAYING_VIDEOS) {
+            videoElement.play().catch(e => {
+                // Unterdrücke Autoplay-Fehler (z.B. wenn Browser-Policy das Abspielen verhindert)
+                // console.log("Autoplay blockiert:", e);
+            });
+            
+            // Zähler nur erhöhen, wenn es erfolgreich abgespielt wird
+            // Wir verwenden data-playing, um den Zustand zu verfolgen, der mit dem Zähler korrespondiert
+            if (videoElement.dataset.playing !== 'true') {
+                playingVideoCount++;
+                videoElement.dataset.playing = 'true'; 
+            }
+        }
+    }
+
+    function pauseVideo(videoElement) {
+        // Pausiere nur, wenn das Video aktiv durch unser System gesteuert wird
+        if (videoElement.dataset.playing === 'true') {
+            videoElement.pause();
+            playingVideoCount--;
+            videoElement.dataset.playing = 'false';
+            
+            // Zählerkorrektur
+            if (playingVideoCount < 0) playingVideoCount = 0;
+            
+            // Wichtig: Wenn ein Slot frei wird, prüfen, ob andere sichtbare Videos starten können
+            scanAndPlayVisibleVideos(); 
+        }
+    }
+    
+    function scanAndPlayVisibleVideos() {
+        if (playingVideoCount >= MAX_PLAYING_VIDEOS) return;
+
+        // Finde alle sichtbaren Videos, die noch nicht aktiv sind
+        document.querySelectorAll('#mediaGrid video[data-observed="true"][data-playing="false"]').forEach(video => {
+            if (playingVideoCount < MAX_PLAYING_VIDEOS) {
+                playVideo(video);
+            }
+        });
+    }
+
+    // --- Initialisierung und Helferfunktionen ---
+    async function init() {
+        try {
+            // Vermeide Cache, um die neueste metadata.json zu erhalten
+            const response = await fetch('metadata.json?v=' + new Date().getTime()); 
+            if (response.ok) {
+                metadata = await response.json();
+                
+                const displayFiles = metadata.files.filter(file => {
+                    const extension = file.split('.').pop().toLowerCase();
+                    return ['webm', 'webp', 'gif'].includes(extension);
+                });
+
+                shuffleArray(displayFiles);
+                
+                setupObserver(); // Observer initialisieren
+                renderGrid(displayFiles);
+            } else {
+                throw new Error("metadata.json konnte nicht geladen werden.");
+            }
+        } catch (e) {
+            console.error("Fehler beim Laden der Metadaten:", e);
+            grid.innerHTML = '<div class="text-red-500 p-4">❌ Fehler: Metadaten konnten nicht geladen werden. Läuft der **Python-Server (`python -m http.server`)** und ist `metadata.json` vorhanden?</div>';
+        }
+        
+        // Suche initialisieren
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.toLowerCase().trim();
+            filterGrid(query);
+        });
+
+        // Lade Toggle-Einstellung aus localStorage (falls vorhanden) und setze Listener
+        try {
+            const stored = localStorage.getItem('showTagButtonsForVideos');
+            showTagButtonsForVideos = stored === 'true';
+        } catch (e) {
+            showTagButtonsForVideos = false;
+        }
+
+        const toggleEl = document.getElementById('showTagButtonsVideosToggle');
+        if (toggleEl) {
+            toggleEl.checked = showTagButtonsForVideos;
+            toggleEl.addEventListener('change', (e) => {
+                showTagButtonsForVideos = !!e.target.checked;
+                try { localStorage.setItem('showTagButtonsForVideos', showTagButtonsForVideos ? 'true' : 'false'); } catch (err) {}
+                // Re-render current grid (zeige/verberge Buttons)
+                const files = metadata.files.filter(file => {
+                    const extension = file.split('.').pop().toLowerCase();
+                    return ['webm', 'webp', 'gif'].includes(extension);
+                });
+                renderGrid(files);
+            });
+        }
+    }
+
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+    }
+
+    // --- RENDER FUNKTION ---
+
+    function renderGrid(filesToList) {
+        // Vor dem erneuten Rendern: Alte Observer trennen und Zähler zurücksetzen
+        if (mediaObserver) {
+            // Dies ist wichtig, wenn die Gitterstruktur durch Filterung neu aufgebaut wird
+            document.querySelectorAll('#mediaGrid .card').forEach(card => {
+                mediaObserver.unobserve(card);
+            });
+            playingVideoCount = 0;
+        }
+        
+        grid.innerHTML = '';
+
+        filesToList.forEach(file => {
+            const extension = file.split('.').pop().toLowerCase();
+            const isVideo = extension === 'webm'; 
+            const fileTags = metadata.assignments[file] || [];
+            
+            const card = document.createElement('div');
+            card.id = `card-${file.replace('.', '-')}`; 
+            card.className = "card shadow-lg"; 
+            // Entscheide dynamisch, ob der "Tags bearbeiten"-Button angezeigt wird (bei aktiviertem Toggle für alle Medien)
+            let tagButtonHtml = '';
+            if (showTagButtonsForVideos) {
+                tagButtonHtml = `<button onclick="openModal('${file}')" class="w-full bg-[#2b2b2b] text-xs p-1 rounded border border-gray-700 hover:border-[#ff9900] transition text-gray-300 focus:outline-none mt-auto">Tags bearbeiten</button>`;
+            }
+            
+            // Medieninhalt
+            let mediaHtml = '';
+            
+            if (isVideo) {
+                // WICHTIG: Autoplay/Loop/Muted bleibt im Code, aber die Wiedergabe wird durch den Observer gesteuert!
+                // data-playing="false" und data-observed="false" werden für das Management benötigt.
+                mediaHtml = `
+                    <video src="sources/${file}" 
+                           muted loop playsinline 
+                           data-playing="false"
+                           data-observed="false"
+                           class="w-full h-full object-contain" 
+                           loading="lazy" 
+                           preload="none">
+                    </video>`;
+            } else {
+                // Bilder nutzen loading="lazy" (Browsereigene Optimierung)
+                mediaHtml = `<img src="sources/${file}" loading="lazy" class="w-full h-full object-contain" alt="${file}">`;
+            }
+
+            card.innerHTML = `
+                <div class="media-container relative group cursor-pointer">
+                    ${mediaHtml}
+                    </div>
+                <div class="p-3 flex flex-col flex-grow">
+                    <div class="text-xs text-gray-400 mb-1 truncate" title="${file}">${file}</div>
+                    <div id="tags-for-${file.replace('.', '-')}" class="flex flex-wrap gap-1 mb-2 min-h-[20px]">
+                        ${fileTags.map(t => `<span class="tag-display bg-[#2b2b2b] border border-gray-700 text-[10px] px-1 rounded text-gray-300">${t}</span>`).join('')}
+                    </div>
+                    
+                    ${tagButtonHtml}
+                </div>
+            `;
+            
+            grid.appendChild(card);
+            
+            // NEU: Card dem Observer hinzufügen, um Sichtbarkeit zu tracken
+            if (mediaObserver) mediaObserver.observe(card);
+        });
+    }
+
+     // --- Filter-Funktionen ---
+
+    function filterGrid(query) {
+        // Pausiert alle Videos, bevor das Grid neu gerendert/gefiltert wird
+        document.querySelectorAll('#mediaGrid video[data-playing="true"]').forEach(video => {
+            pauseVideo(video);
+        });
+        
+        const filesToDisplay = metadata.files.filter(file => {
+            const extension = file.split('.').pop().toLowerCase();
+            if (!['webm', 'webp', 'gif'].includes(extension)) return false;
+
+            const assignedTags = metadata.assignments[file] || [];
+            
+            if (file.toLowerCase().includes(query)) {
+                return true;
+            }
+            
+            if (assignedTags.some(tag => tag.toLowerCase().includes(query))) {
+                return true;
+            }
+            
+            return false;
+        });
+
+        renderGrid(filesToDisplay);
+    }
+    
+    // --- Admin/Modal-Funktionen (Unverändert) ---
+
+    function updateCardTagsUI(file) {
+        const container = document.getElementById(`tags-for-${file.replace('.', '-')}`);
+        if (!container) return;
+        
+        const fileTags = metadata.assignments[file] || [];
+        container.innerHTML = fileTags.map(t => 
+            `<span class="tag-display bg-[#2b2b2b] border border-gray-700 text-[10px] px-1 rounded text-gray-300">${t}</span>`
+        ).join('');
+    }
+
+    function toggleAdmin() {
+        const panel = document.getElementById('adminPanel');
+        if (!panel) {
+            console.error('toggleAdmin: adminPanel element not found');
+            return;
+        }
+
+        panel.classList.toggle('hidden');
+        // Fallback: set inline display for cases where Tailwind classes might not apply yet
+        if (panel.classList.contains('hidden')) {
+            panel.style.display = 'none';
+        } else {
+            panel.style.display = 'block';
+        }
+
+        renderGlobalTags();
+        console.log('toggleAdmin called — panel visible:', !panel.classList.contains('hidden'));
+    }
+
+    function addGlobalTag() {
+        const input = document.getElementById('newTagName');
+        const val = input.value.trim().toLowerCase();
+        if(val && !metadata.tags.includes(val)) {
+            metadata.tags.push(val);
+            metadata.tags.sort();
+            input.value = '';
+            renderGlobalTags();
+            alert(`Tag "${val}" erstellt. JSON speichern nicht vergessen!`);
+        }
+    }
+
+    function removeGlobalTag(tag) {
+        metadata.tags = metadata.tags.filter(t => t !== tag);
+        
+        for (const file in metadata.assignments) {
+            metadata.assignments[file] = metadata.assignments[file].filter(t => t !== tag);
+        }
+        
+        renderGlobalTags();
+        alert(`Tag "${tag}" gelöscht und aus allen Dateien entfernt. JSON speichern nicht vergessen!`);
+    }
+
+    function renderGlobalTags() {
+        const list = document.getElementById('globalTagsList');
+        list.innerHTML = metadata.tags.map(t => `
+            <span class="ph-bg-orange text-black font-bold px-2 py-1 rounded cursor-pointer flex items-center gap-1">
+                ${t} 
+                <button onclick="removeGlobalTag('${t}')" class="text-xs text-red-700 hover:text-red-900 leading-none">
+                    &times;
+                </button>
+            </span>
+        `).join('');
+    }
+
+    function openModal(filename) {
+        currentFileInModal = filename;
+        document.getElementById('modalFilename').textContent = filename;
+        
+        const assignedTags = metadata.assignments[filename] || [];
+        
+        renderModalTags(assignedTags);
+        modal.classList.remove('hidden');
+    }
+
+    function renderModalTags(assignedTags) {
+        const availableList = document.getElementById('availableTagsList');
+        const assignedList = document.getElementById('assignedTagsList');
+        
+        availableList.innerHTML = metadata.tags
+            .filter(t => !assignedTags.includes(t))
+            .map(t => `
+                <span onclick="assignTag('${t}')" class="tag-available bg-gray-600 text-white text-xs px-2 py-1 rounded cursor-pointer hover:bg-gray-500 transition">${t}</span>
+            `).join('');
+
+        assignedList.innerHTML = assignedTags.map(t => `
+            <span onclick="unassignTag('${t}')" class="tag-assigned ph-bg-orange text-black font-bold text-xs px-2 py-1 rounded cursor-pointer flex items-center gap-1">
+                ${t} 
+                <span class="text-sm leading-none">&times;</span>
+            </span>
+        `).join('');
+    }
+
+    function assignTag(tag) {
+        let assignedTags = metadata.assignments[currentFileInModal] || [];
+        if (!assignedTags.includes(tag)) {
+            assignedTags.push(tag);
+            assignedTags.sort();
+            metadata.assignments[currentFileInModal] = assignedTags;
+            renderModalTags(assignedTags);
+        }
+    }
+
+    function unassignTag(tag) {
+        let assignedTags = metadata.assignments[currentFileInModal] || [];
+        metadata.assignments[currentFileInModal] = assignedTags.filter(t => t !== tag);
+        renderModalTags(metadata.assignments[currentFileInModal]);
+    }
+
+    async function saveModalChanges() {
+        // UI aktualisieren
+        updateCardTagsUI(currentFileInModal);
+
+        // Versuche, die Metadaten sofort auf dem Server zu speichern.
+        // Wenn der Server nicht erreichbar ist, bleibt die Änderung lokal in memory (metadata).
+        try {
+            const ok = await saveMetadataToServer(metadata);
+            if (ok) {
+                alert('Änderungen gespeichert und metadata.json auf dem Server aktualisiert.');
+            } else {
+                alert('Änderungen lokal übernommen, aber Speichern auf dem Server fehlgeschlagen.');
+            }
+        } catch (e) {
+            console.error('saveModalChanges: Fehler beim Speichern', e);
+            alert('Änderungen lokal übernommen, aber Speichern auf dem Server fehlgeschlagen.');
+        }
+
+        closeModal();
+    }
+
+    function closeModal() {
+        modal.classList.add('hidden');
+        currentFileInModal = null;
+    }
+    
+    // --- JSON Export (Download) ---
+    function exportMetadata() {
+        const jsonString = JSON.stringify(metadata, null, 4);
+        saveMetadataToServer(metadata);
+        alert("metadata.json wurde aktualisiert. Pushe die Änderungen zu Git!");
+    }
+
+
+    // Start
+    init();
+
+    </script>
+</body>
+</html>
