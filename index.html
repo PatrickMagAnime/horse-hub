@@ -307,9 +307,10 @@ async function saveMetadataToServer(metadata) {
             const isVideo = extension === 'webm'; 
             const fileTags = metadata.assignments[file] || [];
             
-            const card = document.createElement('div');
-            card.id = `card-${file.replace('.', '-')}`; 
-            card.className = "card shadow-lg"; 
+                const safeIdSuffix = file.replace(/[^a-zA-Z0-9_-]/g, '-');
+                const card = document.createElement('div');
+                card.id = `card-${safeIdSuffix}`;
+                card.className = "card shadow-lg";
             // Entscheide dynamisch, ob der "Tags bearbeiten"-Button angezeigt wird (bei aktiviertem Toggle für alle Medien)
             let tagButtonHtml = '';
             if (showTagButtonsForVideos) {
@@ -319,11 +320,11 @@ async function saveMetadataToServer(metadata) {
             // Medieninhalt
             let mediaHtml = '';
             
-            if (isVideo) {
+                if (isVideo) {
                 // WICHTIG: Autoplay/Loop/Muted bleibt im Code, aber die Wiedergabe wird durch den Observer gesteuert!
                 // data-playing="false" und data-observed="false" werden für das Management benötigt.
                 mediaHtml = `
-                    <video src="sources/${file}" 
+                    <video src="sources/${encodeURIComponent(file)}" 
                            muted loop playsinline 
                            data-playing="false"
                            data-observed="false"
@@ -333,7 +334,7 @@ async function saveMetadataToServer(metadata) {
                     </video>`;
             } else {
                 // Bilder nutzen loading="lazy" (Browsereigene Optimierung)
-                mediaHtml = `<img src="sources/${file}" loading="lazy" class="w-full h-full object-contain" alt="${file}">`;
+                mediaHtml = `<img src="sources/${encodeURIComponent(file)}" loading="lazy" class="w-full h-full object-contain" alt="${file}">`;
             }
 
             card.innerHTML = `
@@ -342,7 +343,7 @@ async function saveMetadataToServer(metadata) {
                     </div>
                 <div class="p-3 flex flex-col flex-grow">
                     <div class="text-xs text-gray-400 mb-1 truncate" title="${file}">${file}</div>
-                    <div id="tags-for-${file.replace('.', '-')}" class="flex flex-wrap gap-1 mb-2 min-h-[20px]">
+                    <div id="tags-for-${safeIdSuffix}" class="flex flex-wrap gap-1 mb-2 min-h-[20px]">
                         ${fileTags.map(t => `<span class="tag-display bg-[#2b2b2b] border border-gray-700 text-[10px] px-1 rounded text-gray-300">${t}</span>`).join('')}
                     </div>
                     
@@ -388,7 +389,8 @@ async function saveMetadataToServer(metadata) {
     // --- Admin/Modal-Funktionen (Unverändert) ---
 
     function updateCardTagsUI(file) {
-        const container = document.getElementById(`tags-for-${file.replace('.', '-')}`);
+        const safeIdSuffix = file.replace(/[^a-zA-Z0-9_-]/g, '-');
+        const container = document.getElementById(`tags-for-${safeIdSuffix}`);
         if (!container) return;
         
         const fileTags = metadata.assignments[file] || [];
